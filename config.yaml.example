@@ -1,0 +1,23 @@
+# Default Settings:
+#
+# token: string, GitHub access token
+# backupPath: string, path where to backup
+# cloneViaSSH: boolean, whether to clone via SSH or HTTPS
+
+default:
+    token: HERE_COMES_A_TOKEN
+    backupPath: HERE_COMES_A_PATH
+    cloneViaSSH: true
+
+# Organizations Settings
+# What organizations to backup
+
+organizations:
+    organization1:
+        enabled: true
+
+    organization2:
+        enabled: true
+
+    organization3:
+        enabled: false
