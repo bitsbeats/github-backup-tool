@@ -20,11 +20,25 @@ Eventually, backing up of these will be implemented.
 
 1. Set up a GitHub token, with a "repo" scope.
 2. Configure the `config.yaml` file accordingly.
-3. Set up your running environment:
-    1. Create a Python virtual environment via `virtualenv venv`
-    2. Activate your `venv` via `source venv/bin/activate` (Consider the shell you are using, and adjuct this step accrodingly.)
-    3. Install all the dependencies via `pip install -r requirements.txt`
+3. Set up your running environment either via a virtualenv or distribution packages:
+   * virtualenv:
+       * Create a Python virtual environment via `virtualenv venv`
+       * Activate your `venv` via `source venv/bin/activate` (Consider the shell you are using, and adjuct this step accrodingly.)
+       * Install all the dependencies via `pip install -r requirements.txt`
+   * distribution packages:
+      * [GitPython](https://github.com/gitpython-developers/GitPython), [GitPython@Repology](https://repology.org/project/python:gitpython/versions)
+      * [PyGithub](https://github.com/PyGithub/PyGithub), [PyGithub@Repology](https://repology.org/project/python:pygithub/versions)
+      * [PyYAML](https://pyyaml.org/), [PyYAML@Repology](https://repology.org/project/python:pyyaml/versions)
 4. Run `github-backup.py`.
+
+#TODOs:
+- [x] Backup abandoned commits in master as a separate branch if commits were pushed to origin forcefully
+- [ ] Backup issues
+- [ ] Backup hooks
+- [ ] Backup information of users, belonging to a organization
+- [ ] Configuration: allow for ignoring of certain repositories
+- [ ] Brainstorm about more ideas as to what to back up
+
 
 ## LICENSE: MIT
 That is, it comes without any warranty, so no sticker that warns you that the warranty will be voided if destroyed.
