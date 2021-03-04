@@ -1,5 +1,7 @@
 # github-backup-tool
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 BIG NOTE: This is a work-in-progress.
 
 A crunchy tool for backing up repositories of multiple specified GitHub organizations.
