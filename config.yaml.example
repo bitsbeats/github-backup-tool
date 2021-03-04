@@ -8,6 +8,8 @@ default:
     token: HERE_COMES_A_TOKEN
     backupPath: HERE_COMES_A_PATH
     cloneViaSSH: true
+    verbose: false
+    ssh-key: path/to/some/id_sshkey
 
 # Organizations Settings
 # What organizations to backup
