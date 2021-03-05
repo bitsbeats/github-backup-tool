@@ -33,7 +33,7 @@ Eventually, backing up of these will be implemented.
       * [PyYAML](https://pyyaml.org/), [PyYAML@Repology](https://repology.org/project/python:pyyaml/versions)
 4. Run `github-backup.py`.
 
-#TODOs:
+# TODOs:
 - [x] Backup abandoned commits in master as a separate branch if commits were pushed to origin forcefully
 - [ ] Backup issues
 - [ ] Backup hooks
