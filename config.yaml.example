@@ -6,10 +6,21 @@
 
 default:
     token: HERE_COMES_A_TOKEN
-    backupPath: HERE_COMES_A_PATH
+    backupPath: /path/to/backup/location
     cloneViaSSH: true
-    verbose: false
     ssh-key: path/to/some/id_sshkey
+
+# Tracker Settings
+#
+# trackDB: string, path for the tracker database file
+
+tracker:
+    trackDB: /path/to/sqlite.db
+    trackRepositories: true
+    trackAbandonedBranches: true
+    deleteAbandonedBranchesAfter: 0d
+    deleteRemovedRepositoriesAfter: 90d
+    deleteRemovedBranchesAfter: 90d
 
 # Organizations Settings
 # What organizations to backup

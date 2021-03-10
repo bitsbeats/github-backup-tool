@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
@@ -15,19 +13,12 @@ try:
 except ImportError:
     from yaml import Loader, Dumper
 
-import argparse
 import os
+import shutil
 import sys
 import time
 
-
-def parse_args():
-    parser = argparse.ArgumentParser(description='Backup GitHub Repositories')
-    parser.add_argument('-c',
-                        '--config',
-                        dest='config',
-                        help='configuration file to use')
-    return parser.parse_args()
+from .repository_db import Tracker
 
 
 class Configuration:
@@ -45,10 +36,8 @@ class Configuration:
 
             self.backup_path = config["default"]["backupPath"]
             self.clone_via_ssh = config["default"]["cloneViaSSH"]
-            self.delete_abandoned_branches_after = config["default"]["deleteAbandonedBranchesAfter"]
             self.organizations = []
             self.token = config["default"]["token"]
-            self.verbose = config["default"]["verbose"]
 
             ssh_key_path = Path(config["default"]["ssh-key"] if config["default"]["ssh-key"] is not None else "")
             self.ssh_key = ssh_key_path if os.path.exists(ssh_key_path) else None
@@ -56,6 +45,13 @@ class Configuration:
             for org in config["organizations"]:
                 if config["organizations"][org]["enabled"]:
                     self.organizations.append(org)
+
+            self.track_db = config["tracker"]["trackDB"]
+            self.track_repositories = config["tracker"]["trackRepositories"]
+            self.track_abandoned_branches = config["tracker"]["trackAbandonedBranches"]
+            self.delete_abandoned_branches_after = config["tracker"]["deleteAbandonedBranchesAfter"]
+            self.delete_removed_repositories_after = config["tracker"]["deleteRemovedRepositoriesAfter"]
+            self.delete_removed_branches_after = config["tracker"]["deleteRemovedBranchesAfter"]
 
     def get_backup_path(self):
         return self.backup_path
@@ -73,20 +69,37 @@ class Configuration:
     def get_token(self):
         return self.token
 
-    def get_verbose(self):
-        return self.verbose
-
-    def get_retention_days(self):
-        duration = self.delete_abandoned_branches_after
-        if "d" in duration:
-            return int(str(duration).strip("d"))
-        elif "m" in duration:
-            return int(str(duration).strip("m")) * 30
-        elif "y" in duration:
-            return int(str(duration).strip("y")) * 365
+    @classmethod
+    def get_days(cls, time_period):
+        if "d" in time_period:
+            return int(str(time_period).strip("d"))
+        elif "m" in time_period:
+            return int(str(time_period).strip("m")) * 30
+        elif "y" in time_period:
+            return int(str(time_period).strip("y")) * 365
         else:
-            print("Check deleteAbandonedBranchesAfter in your configuration file!")
             return -1
+
+    def get_delete_abandoned_branches_after(self):
+        duration = self.delete_abandoned_branches_after
+        return self.get_days(duration)
+
+    def get_track_db(self):
+        return self.track_db
+
+    def get_track_repositories(self):
+        return self.track_repositories
+
+    def get_track_abandoned_branches(self):
+        return self.track_abandoned_branches
+
+    def get_delete_removed_repositories_after(self):
+        duration = self.delete_removed_repositories_after
+        return self.get_days(duration)
+
+    def get_delete_removed_branches_after(self):
+        duration = self.delete_removed_branches_after
+        return self.get_days(duration)
 
 
 class GithubApi:
@@ -202,7 +215,7 @@ class Git:
             print(repository.full_name, "empty remote/access restricted:", error.status, file=sys.stderr)
             return False
 
-    def clone_mirror(self, repository: Repository):
+    def clone(self, repository: Repository):
         repository_path = self.get_repository_path(repository)
         repository_url = self.get_repository_url(repository)
 
@@ -219,6 +232,11 @@ class Git:
         try:
             print(repository.full_name, "->", repository_path)
             local_clone.clone_from(repository_url, repository_path, env=git_ssh_cmd)
+
+            tracker = Tracker(self.config)
+            tracker.track_repository(repository.full_name, repository.organization.login, datetime.now(),
+                                     datetime.now(), True)
+
         except exc.GitCommandError as error:
             print(repository.full_name, "cannot access repository:", error.status, file=sys.stderr)
 
@@ -229,7 +247,7 @@ class Git:
         if self.check_clone_exists(repository):
             self.update_local(repository)
         else:
-            self.clone_mirror(repository)
+            self.clone(repository)
 
     def get_repository_path(self, repository: Repository):
         return os.path.join(Path(self.config.get_backup_path()), Path(repository.full_name))
@@ -237,12 +255,16 @@ class Git:
     def get_repository_url(self, repository: Repository):
         return repository.ssh_url if self.config.get_use_ssh() else repository.clone_url
 
-    @classmethod
-    def checkout_abandoned_branch(cls, repository: Repo, default_branch, timestamp):
-        branch_name = str(repository.active_branch) + "_abandoned_" + timestamp.strftime("%Y%m%d_%H%M%S")
+    def checkout_abandoned_branch(self, repository: Repository.Repository, default_branch, timestamp):
+        repo = Repo(self.get_repository_path(repository))
+        branch_name = str(repo.active_branch) + "_abandoned_" + timestamp.strftime("%Y%m%d_%H%M%S")
 
-        repository.git.checkout('-b', branch_name)
-        repository.git.checkout(default_branch)
+        repo.git.checkout('-b', branch_name)
+        repo.git.checkout(default_branch)
+
+        now = datetime.now()
+        tracker = Tracker(self.config)
+        tracker.track_branch(branch_name, repository.full_name, now, now, True, True)
 
     @classmethod
     def reset_branch(cls, repo: Repo, branch):
@@ -253,6 +275,13 @@ class Git:
                 ref_to_reset = ref
 
         repo.git.reset('--hard', str(ref_to_reset))
+
+    def remote_branch_exists(self, repository: Repo, branch_name):
+        for branch in self.get_remote_branches(repository):
+            if branch_name in branch:
+                return True
+
+        return False
 
     @classmethod
     def get_remote_branches(cls, repository: Repo):
@@ -289,16 +318,6 @@ class Git:
 
         return branches_commit_ids
 
-    @classmethod
-    def get_abandoned_branch_creation_date(cls, branch_name: str):
-        if "_abandoned_" in branch_name:
-            branch_name_splitted = branch_name.split("_")
-            date_time = branch_name_splitted[-2] + "_" + branch_name_splitted[-1]
-            date_time_obj = datetime.strptime(date_time, '%Y%m%d_%H%M%S')
-            return date_time_obj
-        else:
-            return -1
-
     def backup_branch(self, repository: Repository.Repository, default_branch):
         repo = Repo(self.get_repository_path(repository))
         timestamp = datetime.now()
@@ -308,7 +327,7 @@ class Git:
         if commit_id not in self.get_remote_branches_commit_ids(repo):
             print(repository.full_name, str(default_branch), "->",
                   str(default_branch) + "_abandoned_" + timestamp.strftime("%Y%m%d_%H%M%S"))
-            self.checkout_abandoned_branch(repo, default_branch, timestamp)
+            self.checkout_abandoned_branch(repository, default_branch, timestamp)
 
             print(repository.full_name, str(default_branch), "<-", "origin/" + default_branch)
             self.reset_branch(repo, default_branch)
@@ -318,19 +337,32 @@ class Git:
         local_default_branch = repo.active_branch
 
         print(repository.full_name, "<-", "remote")
-        repo.remote().fetch()
+
+        try:
+            repo.remote().fetch()
+        except exc.GitCommandError as error:
+            pass
+
+        tracker = Tracker(self.config)
+
+        tracker.track_repository(repository.full_name, repository.organization.login, datetime.now(),
+                                 datetime.now(), True)
 
         for branch in self.get_remote_branches(repo):
             branch_name = str(branch).rsplit('/', 1)[-1]
+
             try:
                 if local_default_branch != branch_name:
                     repo.git.checkout('-b', branch_name, str(branch))
+                    tracker.track_branch(branch_name, repository.full_name, datetime.now(), datetime.now(), False, True)
             except exc.GitCommandError:
                 pass
 
             try:
                 repo.git.merge('--ff-only')
                 print(repository.full_name, branch_name, "<-", "origin/" + branch_name)
+
+                tracker.update_branch(branch_name, repository.full_name, datetime.now())
             except exc.GitCommandError as error:
                 if error.status == 128:
                     print(repository.full_name, branch_name, "<-", "origin/" + branch_name, "failed", file=sys.stderr)
@@ -338,35 +370,42 @@ class Git:
 
         repo.git.checkout(str(local_default_branch))
 
-    def clean(self, repository: Repository):
-        if not self.check_clone_exists(repository):
-            return []
+        tracker.update_repository(repository.full_name, repository.organization.login, datetime.now())
 
-        repo = Repo(self.get_repository_path(repository))
-        removed_branches = []
-        timestamp = datetime.now()
-        for branch in self.get_local_branches(repo):
-            if "_abandoned_" not in branch:
-                continue
+    def remove_branch(self, branch_name, repository_name):
+        repo = Repo(os.path.join(Path(self.config.get_backup_path()), Path(repository_name)))
 
-            retention_days = self.config.get_retention_days()
+        removed = False
 
-            if retention_days < 0:
-                continue
+        if "_abandoned_" in branch_name:
+            try:
+                repo.git.branch('-D', branch_name)
+                removed = True
+            except exc.GitCommandError as error:
+                removed = False
+        else:
+            remote_branches = []
 
-            if (timestamp - self.get_abandoned_branch_creation_date(branch)).days >= retention_days:
-                repo = Repo(self.get_repository_path(repository))
-                print(repository.full_name, "removing", branch, "older than", retention_days, "days")
-                repo.git.branch('-D', branch)
-                removed_branches.append(branch)
+            for ref in repo.remote().refs:
+                if str(ref).rsplit('/', 1)[-1] == "HEAD":
+                    remote_branches.append(str(ref))
 
-        return removed_branches
+            for branch in remote_branches:
+                try:
+                    if branch != branch_name:
+                        repo.git.branch('-D', branch_name)
+                        removed = True
+                except exc.GitCommandError as error:
+                    removed = False
+
+        return removed
 
 
 class GithubBackup:
     def __init__(self, config: Configuration):
         self.config = config
         self.github_api = GithubApi(config)
+        self.tracker = Tracker(self.config)
 
         if self.config.get_ssh_key() is None:
             print("SSH Key not found.", file=sys.stderr)
@@ -386,84 +425,64 @@ class GithubBackup:
 
             for repository in self.github_api.get_all_repositories_in_organization(organization):
                 self.github_api.rate_limit_wait()
+
                 total_repositories += 1
                 repositories += 1
+
                 self.git.update(repository)
 
             print("-" * 80)
             print("Processed", repositories, "repositories in", organization.login)
+            print("-" * 80)
 
-        print("-" * 80)
         print("Processed", total_repositories, "repositories in", total_organizations, "organizations.")
-        print("-" * 80 + "\n")
 
     def clean_abandoned_branches(self):
-        print("-" * 80)
-        print("Cleaning up...")
+        retention_period = self.config.get_delete_abandoned_branches_after()
 
-        total_organizations = 0
-        total_repositories = 0
-        absolute_removed_branches = 0
-        for organization in self.github_api.get_github_configured_organizations():
-            total_organizations += 1
-            repositories = 0
-            total_removed_branches = 0
+        branches = self.tracker.get_abandoned_branches_older_than(retention_period)
 
-            for repository in self.github_api.get_all_repositories_in_organization(organization):
-                total_repositories += 1
-                repositories += 1
-                removed_branches = self.git.clean(repository)
-                total_removed_branches += len(removed_branches)
-
-                if len(removed_branches) > 0:
-                    print(repository.full_name, "removed:")
-                    print(*removed_branches, sep="\n")
-
-            print("-" * 80)
-            repos = repositories > 1 or repositories == 0
-            print("Processed", repositories, "repositor" + ("ies" if repos else "y"), organization.login)
-
-            branches = total_removed_branches > 1 or total_removed_branches == 0
-            print("Removed", total_removed_branches, "branch" + ("es" if branches else ""))
-
-            absolute_removed_branches += total_removed_branches
+        if len(branches) == 0:
+            return
 
         print("-" * 80)
+        print("Cleaning up abandoned branches:")
 
-        repos = total_repositories > 1 or total_repositories == 0
-        orgas = total_organizations > 1 or total_organizations == 0
-        print("Processed", total_repositories, "repositor" + ("ies" if repos else "y"), "in",
-              total_organizations, "organization" + ("s" if orgas else ""))
+        for branch_tuple in branches:
+            removed = self.git.remove_branch(branch_tuple[0], branch_tuple[1])
+            if removed:
+                print(branch_tuple[1], branch_tuple[0], "removed")
+                self.tracker.delete_branch(branch_tuple[0], branch_tuple[1])
 
-        branches = absolute_removed_branches > 1 or absolute_removed_branches == 0
-        print("Removed", absolute_removed_branches, "branch" + ("es" if branches else ""))
+    def clean_tracked_branches(self):
+        retention_period = self.config.get_delete_removed_branches_after()
+
+        branches = self.tracker.get_branches_older_than(retention_period)
+
+        if len(branches) == 0:
+            return
+
         print("-" * 80)
+        print("Cleaning up branches:")
+
+        for branch_tuple in branches:
+            removed = self.git.remove_branch(branch_tuple[0], branch_tuple[1])
+            if removed:
+                print(branch_tuple[1], branch_tuple[0], "removed")
+                self.tracker.delete_branch(branch_tuple[0], branch_tuple[1])
 
     def clean_tracked_repositories(self):
-        pass
+        retention_period = self.config.get_delete_removed_repositories_after()
 
+        repositories = self.tracker.get_repositories_older_than(retention_period)
 
-def main():
-    now = datetime.now()
-    print("GitHub Backup Tool", now.strftime("%d.%m.%Y %H:%M:%S"), "\n")
-    print("Copyright (c) 2021 Thomann Bits & Beats GmbH")
-    print("All Rights Reserved.")
-    print("~" * 80, "\n")
+        if len(repositories) == 0:
+            return
 
-    args = parse_args()
+        print("-" * 80)
+        print("Cleaning up repositories:")
 
-    if args.config:
-        config = Configuration(args.config)
-    else:
-        config = Configuration("config.yaml")
-
-    backup = GithubBackup(config)
-    backup.backup_organizations()
-    backup.clean_abandoned_branches()
-
-    end = datetime.now()
-    print("Backup ended:", end.strftime("%d.%m.%Y %H:%M:%S"), "Duration:", naturaldelta(now - end))
-
-
-if __name__ == '__main__':
-    main()
+        for repository in repositories:
+            shutil.rmtree(os.path.join(self.config.get_backup_path(), repository), ignore_errors=True)
+            self.tracker.delete_repository(repository, repository.rsplit('/', 1)[0])
+            print(repository, "removed")

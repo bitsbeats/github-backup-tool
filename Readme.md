@@ -7,7 +7,7 @@ BIG NOTE: This is a work-in-progress.
 A crunchy tool for backing up repositories of multiple specified GitHub organizations.
 
 ## What does it do?
-It will backup all Git repositories it has access to. If no GitHub token is provided, only publicly accessible repositories will be cloned.
+It will backup all Git repositories it has access to.
 
 ## What does it not do?
 At this moment, it will not back up:
@@ -31,7 +31,7 @@ Eventually, backing up of these will be implemented.
       * [GitPython](https://github.com/gitpython-developers/GitPython), [GitPython@Repology](https://repology.org/project/python:gitpython/versions)
       * [PyGithub](https://github.com/PyGithub/PyGithub), [PyGithub@Repology](https://repology.org/project/python:pygithub/versions)
       * [PyYAML](https://pyyaml.org/), [PyYAML@Repology](https://repology.org/project/python:pyyaml/versions)
-4. Run `github_backup.py`.
+4. Run `backup.py`.
 
 # TODOs:
 - [x] Backup abandoned commits in master as a separate branch if commits were pushed to origin forcefully
