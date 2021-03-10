@@ -31,7 +31,7 @@ Eventually, backing up of these will be implemented.
       * [GitPython](https://github.com/gitpython-developers/GitPython), [GitPython@Repology](https://repology.org/project/python:gitpython/versions)
       * [PyGithub](https://github.com/PyGithub/PyGithub), [PyGithub@Repology](https://repology.org/project/python:pygithub/versions)
       * [PyYAML](https://pyyaml.org/), [PyYAML@Repology](https://repology.org/project/python:pyyaml/versions)
-4. Run `github-backup.py`.
+4. Run `github_backup.py`.
 
 # TODOs:
 - [x] Backup abandoned commits in master as a separate branch if commits were pushed to origin forcefully
