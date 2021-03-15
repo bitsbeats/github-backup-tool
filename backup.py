@@ -39,7 +39,7 @@ def main():
     backup.print_failed_repositories()
 
     end = datetime.now()
-    print("Backup ended:", end.strftime("%d.%m.%Y %H:%M:%S"), "Duration:", naturaldelta(now - end))
+    print("Backup ended:", end.strftime("%d.%m.%Y %H:%M:%S"), "Duration:", naturaldelta(now - end), "\n")
 
 
 if __name__ == '__main__':

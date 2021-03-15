@@ -83,7 +83,7 @@ class Tracker:
 
         return records
 
-    # TODO: remove cascade whole organization and its deps
+    # TODO: remove with cascade whole organization and its dependencies.
     def delete_organization(self, organization):
         records = self.session.query(Organization).filter(Organization.name == organization).all()
         return
