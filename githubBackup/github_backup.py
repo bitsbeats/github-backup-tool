@@ -234,9 +234,12 @@ class Git:
             local_clone.clone_from(repository_url, repository_path, env=git_ssh_cmd)
 
             tracker = Tracker(self.config)
-            tracker.track_repository(repository.full_name, repository.organization.login, datetime.now(),
+
+            tracker.track_repository(repository.full_name, tracker.get_organization_id(repository.organization.login),
+                                     datetime.now(),
                                      datetime.now(), True)
 
+            self.update_local(repository)
         except exc.GitCommandError as error:
             print(repository.full_name, "cannot access repository:", error.status, file=sys.stderr)
 
@@ -264,7 +267,7 @@ class Git:
 
         now = datetime.now()
         tracker = Tracker(self.config)
-        tracker.track_branch(branch_name, repository.full_name, now, now, True, True)
+        tracker.track_branch(branch_name, tracker.get_repository_id(repository.full_name), now, now, True, True)
 
     @classmethod
     def reset_branch(cls, repo: Repo, branch):
@@ -334,27 +337,31 @@ class Git:
 
     def update_local(self, repository):
         repo = Repo(self.get_repository_path(repository))
-        local_default_branch = repo.active_branch
+        local_default_branch = str(repo.active_branch).strip()
 
         print(repository.full_name, "<-", "remote")
 
         try:
             repo.remote().fetch()
         except exc.GitCommandError as error:
+            print(repository.full_name, "fetch error:", error.status)
             pass
 
         tracker = Tracker(self.config)
 
-        tracker.track_repository(repository.full_name, repository.organization.login, datetime.now(),
+        tracker.track_repository(repository.full_name, tracker.get_organization_id(repository.organization.login),
+                                 datetime.now(),
                                  datetime.now(), True)
 
+        repo_id = tracker.get_repository_id(repository.full_name)
+
         for branch in self.get_remote_branches(repo):
-            branch_name = str(branch).rsplit('/', 1)[-1]
+            branch_name = str(branch).rsplit('/', 1)[-1].strip()
 
             try:
                 if local_default_branch != branch_name:
                     repo.git.checkout('-b', branch_name, str(branch))
-                    tracker.track_branch(branch_name, repository.full_name, datetime.now(), datetime.now(), False, True)
+                    tracker.track_branch(branch_name, repo_id, datetime.now(), datetime.now(), False, True)
             except exc.GitCommandError:
                 pass
 
@@ -362,7 +369,8 @@ class Git:
                 repo.git.merge('--ff-only')
                 print(repository.full_name, branch_name, "<-", "origin/" + branch_name)
 
-                tracker.update_branch(branch_name, repository.full_name, datetime.now())
+                if local_default_branch != branch_name:
+                    tracker.update_branch(branch_name, repo_id, datetime.now())
             except exc.GitCommandError as error:
                 if error.status == 128:
                     print(repository.full_name, branch_name, "<-", "origin/" + branch_name, "failed", file=sys.stderr)
@@ -370,7 +378,8 @@ class Git:
 
         repo.git.checkout(str(local_default_branch))
 
-        tracker.update_repository(repository.full_name, repository.organization.login, datetime.now())
+        tracker.update_repository(repository.full_name, tracker.get_organization_id(repository.organization.login),
+                                  datetime.now())
 
     def remove_branch(self, branch_name, repository_name):
         repo = Repo(os.path.join(Path(self.config.get_backup_path()), Path(repository_name)))
@@ -382,6 +391,7 @@ class Git:
                 repo.git.branch('-D', branch_name)
                 removed = True
             except exc.GitCommandError as error:
+                print(repository_name, branch_name, "deletion error:", error.status)
                 removed = False
         else:
             remote_branches = []
@@ -396,6 +406,7 @@ class Git:
                         repo.git.branch('-D', branch_name)
                         removed = True
                 except exc.GitCommandError as error:
+                    print(repository_name, branch_name, "deletion error:", error.status)
                     removed = False
 
         return removed
@@ -419,9 +430,13 @@ class GithubBackup:
         print("Backing up...")
         total_organizations = 0
         total_repositories = 0
+
         for organization in self.github_api.get_github_configured_organizations():
             total_organizations += 1
             repositories = 0
+
+            tracker = Tracker(self.config)
+            tracker.track_organization(organization.login, True)
 
             for repository in self.github_api.get_all_repositories_in_organization(organization):
                 self.github_api.rate_limit_wait()
