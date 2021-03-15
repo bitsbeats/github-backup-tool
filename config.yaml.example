@@ -18,7 +18,7 @@ tracker:
     trackDB: /path/to/sqlite.db
     trackRepositories: true
     trackAbandonedBranches: true
-    deleteAbandonedBranchesAfter: 0d
+    deleteAbandonedBranchesAfter: 90d
     deleteRemovedRepositoriesAfter: 90d
     deleteRemovedBranchesAfter: 90d
 

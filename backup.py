@@ -36,6 +36,7 @@ def main():
     backup.clean_abandoned_branches()
     backup.clean_tracked_branches()
     backup.clean_tracked_repositories()
+    backup.print_failed_repositories()
 
     end = datetime.now()
     print("Backup ended:", end.strftime("%d.%m.%Y %H:%M:%S"), "Duration:", naturaldelta(now - end))

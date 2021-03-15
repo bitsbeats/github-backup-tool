@@ -189,6 +189,10 @@ class Git:
         self.config = config
         self.ssh_key = ssh_key
         self.github = github
+        self.failed_repos = []
+
+    def get_failed_repositories(self):
+        return self.failed_repos
 
     def print_repos(self):
         for organization in self.github.get_github_configured_organizations():
@@ -242,6 +246,7 @@ class Git:
             self.update_local(repository)
         except exc.GitCommandError as error:
             print(repository.full_name, "cannot access repository:", error.status, file=sys.stderr)
+            self.failed_repos.append(repository.full_name)
 
     def update(self, repository):
         if not self.check_remote_repository_initialized(repository):
@@ -327,6 +332,8 @@ class Git:
 
         commit_id = repo.head.object.hexsha
 
+        # TODO: Maybe also use the 'commits' table in repository_db for tracking.
+
         if commit_id not in self.get_remote_branches_commit_ids(repo):
             print(repository.full_name, str(default_branch), "->",
                   str(default_branch) + "_abandoned_" + timestamp.strftime("%Y%m%d_%H%M%S"))
@@ -344,8 +351,8 @@ class Git:
         try:
             repo.remote().fetch()
         except exc.GitCommandError as error:
-            print(repository.full_name, "fetch error:", error.status)
-            pass
+            print(repository.full_name, "fetch error:", error.status, file=sys.stderr)
+            self.failed_repos.append(repository.full_name)
 
         tracker = Tracker(self.config)
 
@@ -376,7 +383,11 @@ class Git:
                     print(repository.full_name, branch_name, "<-", "origin/" + branch_name, "failed", file=sys.stderr)
                     self.backup_branch(repository, branch_name)
 
-        repo.git.checkout(str(local_default_branch))
+        try:
+            repo.git.checkout(local_default_branch)
+        except exc.GitCommandError as error:
+            print(repository.full_name, local_default_branch, "checkout failed:", error.status, file=sys.stderr)
+            self.failed_repos.append(repository.full_name)
 
         tracker.update_repository(repository.full_name, tracker.get_organization_id(repository.organization.login),
                                   datetime.now())
@@ -391,7 +402,7 @@ class Git:
                 repo.git.branch('-D', branch_name)
                 removed = True
             except exc.GitCommandError as error:
-                print(repository_name, branch_name, "deletion error:", error.status)
+                print(repository_name, branch_name, "deletion error:", error.status, file=sys.stderr)
                 removed = False
         else:
             remote_branches = []
@@ -406,7 +417,7 @@ class Git:
                         repo.git.branch('-D', branch_name)
                         removed = True
                 except exc.GitCommandError as error:
-                    print(repository_name, branch_name, "deletion error:", error.status)
+                    print(repository_name, branch_name, "deletion error:", error.status, file=sys.stderr)
                     removed = False
 
         return removed
@@ -451,6 +462,14 @@ class GithubBackup:
             print("-" * 80)
 
         print("Processed", total_repositories, "repositories in", total_organizations, "organizations.")
+
+    def print_failed_repositories(self):
+        failed_repositories = self.git.get_failed_repositories()
+
+        if len(failed_repositories) > 0:
+            print("Could not backup:", file=sys.stderr)
+            for repository in failed_repositories:
+                print(repository, file=sys.stderr)
 
     def clean_abandoned_branches(self):
         retention_period = self.config.get_delete_abandoned_branches_after()

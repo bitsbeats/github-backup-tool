@@ -47,7 +47,7 @@ class Commit(Base):
     saved_date = Column(DateTime(), nullable=False)
 
     repository_id = Column(Integer, ForeignKey('repositories.id'))
-    branch_id = Column(Integer, ForeignKey('branch.id'))
+    branch_id = Column(Integer, ForeignKey('branches.id'), nullable=False)
 
     branch = relationship("Branch")
 
