@@ -1,7 +1,5 @@
 # github-backup-tool
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
 BIG NOTE: This is a work-in-progress.
 
 A crunchy tool for backing up repositories of multiple specified GitHub organizations.
@@ -16,7 +14,7 @@ At this moment, it will not back up:
 * Hooks
 * ...
 
-Eventually, backing up of these will be implemented.
+*Eventually*, backing up of these will be implemented.
 
 ## How to use?
 
@@ -37,10 +35,6 @@ Eventually, backing up of these will be implemented.
 - [x] Backup abandoned commits in master as a separate branch if commits were pushed to origin forcefully
 - [ ] Backup issues
 - [ ] Backup hooks
-- [ ] Backup information of users, belonging to a organization
+- [ ] Backup information of users, belonging to an organization
 - [ ] Configuration: allow for ignoring of certain repositories
 - [ ] Brainstorm about more ideas as to what to back up
-
-
-## LICENSE: MIT
-That is, it comes without any warranty, so no sticker that warns you that the warranty will be voided if destroyed.
