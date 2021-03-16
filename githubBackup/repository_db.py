@@ -24,6 +24,8 @@ class Repository(Base):
     track = Column(Boolean(), nullable=False)
     organization_id = Column(Integer, ForeignKey('organizations.id'), nullable=False)
 
+    scheduled_for_deletion = Column(Boolean(), nullable=False)
+
     organization = relationship("Organization")
 
 
@@ -100,7 +102,7 @@ class Tracker:
             self.session.add(
                 Repository(name=repository, created_date=create_date,
                            last_seen_in_github=create_date,
-                           track=track, organization_id=organization_id))
+                           track=track, organization_id=organization_id, scheduled_for_deletion=False))
 
         self.session.commit()
 
@@ -128,13 +130,14 @@ class Tracker:
         if (len(records)) >= 1:
             for record in records:
                 record.last_seen_in_github = datetime.now()
+                record.scheduled_for_deletion = False
 
             self.session.commit()
 
     def delete_repository(self, repository, organization):
         records = self.session.query(Repository).join(Organization,
                                                       Organization.id == Repository.organization_id).filter(
-            Repository.name == repository).all()
+            Repository.name == repository, Repository.scheduled_for_deletion == True).all()
 
         if (len(records)) >= 1:
             self.delete_all_branches(repository)
@@ -144,18 +147,29 @@ class Tracker:
 
             self.session.commit()
 
-    def get_repositories_older_than(self, time_period):
+    def get_repositories_older_than(self, time_period, scheduled_for_deletion):
         ago = datetime.now() - timedelta(days=time_period)
 
         records = self.session.query(Repository).join(Organization,
                                                       Organization.id == Repository.organization_id).filter(
-            Repository.last_seen_in_github <= ago).all()
+            Repository.last_seen_in_github <= ago, Repository.scheduled_for_deletion == scheduled_for_deletion).all()
 
         list_of_repositories = []
         for record in records:
             list_of_repositories.append(record.name)
 
         return list_of_repositories
+
+    def do_not_warn_about_future_deletion(self, repository):
+        records = self.session.query(Repository).join(Organization,
+                                                      Organization.id == Repository.organization_id).filter(
+            Repository.name == repository, Repository.scheduled_for_deletion == False).all()
+
+        if (len(records)) >= 1:
+            for record in records:
+                record.scheduled_for_deletion = True
+
+            self.session.commit()
 
     def track_branch(self, branch_name, repository_id, create_date, last_seen_in_github, abandoned, track):
         records = self.session.query(Branch).join(Repository, Repository.id == Branch.repository_id).filter(

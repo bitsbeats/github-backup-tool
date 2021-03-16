@@ -5,6 +5,8 @@
 # cloneViaSSH: boolean, whether to clone via SSH or HTTPS
 
 default:
+    # INFO, WARNING, ERROR, (DEBUG)
+    loglevel: INFO
     token: HERE_COMES_A_TOKEN
     backupPath: /path/to/backup/location
     cloneViaSSH: true
@@ -21,6 +23,7 @@ tracker:
     deleteAbandonedBranchesAfter: 90d
     deleteRemovedRepositoriesAfter: 90d
     deleteRemovedBranchesAfter: 90d
+    warnBeforeRepositoryDeletion: 15d
 
 # Organizations Settings
 # What organizations to backup

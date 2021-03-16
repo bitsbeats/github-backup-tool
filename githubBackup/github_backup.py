@@ -13,6 +13,7 @@ try:
 except ImportError:
     from yaml import Loader, Dumper
 
+import logging
 import os
 import shutil
 import sys
@@ -23,6 +24,10 @@ from .repository_db import Tracker
 
 class Configuration:
     def __init__(self, filename):
+        self.error_count = 0
+        self.start_datetime = datetime.now()
+        self.end_datetime = None
+
         with open(filename, "r") as configfile:
             try:
                 config = load(configfile, Loader=Loader)
@@ -52,6 +57,16 @@ class Configuration:
             self.delete_abandoned_branches_after = config["tracker"]["deleteAbandonedBranchesAfter"]
             self.delete_removed_repositories_after = config["tracker"]["deleteRemovedRepositoriesAfter"]
             self.delete_removed_branches_after = config["tracker"]["deleteRemovedBranchesAfter"]
+
+            self.warn_before_repository_deletion = config["tracker"]["warnBeforeRepositoryDeletion"]
+
+            self.loglevel = config["default"]["loglevel"]
+
+        logging.basicConfig(level=self.loglevel,
+                            format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+
+        self.log = logging.getLogger(__name__)
+        self.log.info("GitHub Backup Tool - Copyright (c) 2021 Thomann Bits & Beats GmbH - All Rights Reserved.")
 
     def get_backup_path(self):
         return self.backup_path
@@ -101,6 +116,13 @@ class Configuration:
         duration = self.delete_removed_branches_after
         return self.get_days(duration)
 
+    def get_warn_before_repository_deletion(self):
+        duration = self.warn_before_repository_deletion
+        return self.get_days(duration)
+
+    def end(self):
+        self.end_datetime = datetime.now()
+
 
 class GithubApi:
     def __init__(self, config: Configuration):
@@ -111,10 +133,9 @@ class GithubApi:
         self.github_organizations = []
 
     def print_info(self):
-        now = datetime.now()
         user = self.github.get_user()
 
-        print("Accessing GitHub as", user.login, "on", now.strftime("%d.%m.%Y %H:%M:%S"), "\n")
+        self.config.log.info("Accessing GitHub as %s", user.login)
 
         github_organizations = []
 
@@ -123,20 +144,18 @@ class GithubApi:
 
         organizations_difference = [x for x in github_organizations if x not in self.configured_organizations]
 
-        print("Organizations selected for backup:")
+        self.config.log.info("Organizations selected for backup:")
         for organization in self.configured_organizations:
-            print("  ", organization, "\n" if organization == self.configured_organizations[-1] else "")
+            self.config.log.info("  %s", organization)
 
         if len(organizations_difference) > 0:
-            print("Organization"
-                  + ("s" if len(organizations_difference) > 1 else "")
-                  + " NOT selected for backup:")
+            self.config.log.info("Organizations not selected for backup:")
 
             for organization in organizations_difference:
-                print("  ", organization, "\n" if organization == organizations_difference[-1] else "")
+                self.config.log.info("  %s", organization)
 
-            print("WARNING:", "There are organizations not selected for backup.", file=sys.stderr)
-            print("WARNING:", "Potential data loss may occur.", "\n", file=sys.stderr)
+            self.config.log.info("There are organizations not selected for backup.")
+            self.config.log.info("Potential data loss may occur.")
 
     def get_github_organizations(self):
         self.github_organizations = self.github.get_user().get_orgs()
@@ -178,7 +197,8 @@ class GithubApi:
         request_limit = self.github.rate_limiting[1]
 
         if (request_limit - requests_remaining) <= 0:
-            print("GitHub Rate Limit exceeded!", "Waiting for", naturaldelta(reset_core - now), "for reset.")
+            self.config.log.warning("GitHub Rate Limit exceeded! Waiting for %s for reset.",
+                                    naturaldelta(reset_core - now))
             wait_time = (reset_core - now).total_seconds()
             time.sleep(wait_time)
 
@@ -189,10 +209,17 @@ class Git:
         self.config = config
         self.ssh_key = ssh_key
         self.github = github
-        self.failed_repos = []
+        self.failed_repositories = []
+
+        self.git_ssh_cmd = {}
+        ssh_str_path = str(self.config.get_ssh_key())
+
+        if ssh_str_path != ".":
+            self.ssh_cmd = "ssh -i " + ssh_str_path + " -F " + "/dev/null " + "-o StrictHostKeyChecking=accept-new"
+            os.environ['GIT_SSH_COMMAND'] = self.ssh_cmd
 
     def get_failed_repositories(self):
-        return self.failed_repos
+        return self.failed_repositories
 
     def print_repos(self):
         for organization in self.github.get_github_configured_organizations():
@@ -213,10 +240,16 @@ class Git:
         git = cmd.Git()
 
         try:
-            git.ls_remote('-h', repository_url)
-            return True
+            response = git.ls_remote('-h', repository_url).split()
+
+            if len(response) > 0:
+                return True
+            else:
+                self.config.log.info("%s is empty", repository.full_name)
+                return False
         except exc.GitCommandError as error:
-            print(repository.full_name, "empty remote/access restricted:", error.status, file=sys.stderr)
+            self.config.log.error("%s access restricted: %s" % (repository.full_name, error.status))
+            self.config.error_count += 1
             return False
 
     def clone(self, repository: Repository):
@@ -225,17 +258,9 @@ class Git:
 
         local_clone = Repo()
 
-        git_ssh_cmd = {}
-        ssh_str_path = str(self.config.get_ssh_key())
-
-        if ssh_str_path != ".":
-            ssh_cmd = "ssh -i " + ssh_str_path + " -F " + "/dev/null " + "-o StrictHostKeyChecking=accept-new"
-            git_ssh_cmd = {
-                "GIT_SSH_COMMAND": ssh_cmd}
-
         try:
-            print(repository.full_name, "->", repository_path)
-            local_clone.clone_from(repository_url, repository_path, env=git_ssh_cmd)
+            self.config.log.info("%s -> %s" % (repository.full_name, repository_path))
+            local_clone.clone_from(repository_url, repository_path)
 
             tracker = Tracker(self.config)
 
@@ -245,7 +270,8 @@ class Git:
 
             self.update_local(repository)
         except exc.GitCommandError as error:
-            print(repository.full_name, "cannot access repository:", error.status, file=sys.stderr)
+            self.config.log.error("%s cannot access repository: %s" % (repository.full_name, error.status))
+            self.config.error_count += 1
             self.failed_repos.append(repository.full_name)
 
     def update(self, repository):
@@ -267,8 +293,13 @@ class Git:
         repo = Repo(self.get_repository_path(repository))
         branch_name = str(repo.active_branch) + "_abandoned_" + timestamp.strftime("%Y%m%d_%H%M%S")
 
-        repo.git.checkout('-b', branch_name)
-        repo.git.checkout(default_branch)
+        try:
+            repo.git.checkout('-b', branch_name)
+            repo.git.checkout(default_branch)
+        except exc.GitCommandError as error:
+            self.config.log.error("%s %s checkout failed: %s" % (
+                repository.full_name, branch_name, error.status))
+            self.config.error_count += 1
 
         now = datetime.now()
         tracker = Tracker(self.config)
@@ -335,24 +366,26 @@ class Git:
         # TODO: Maybe also use the 'commits' table in repository_db for tracking.
 
         if commit_id not in self.get_remote_branches_commit_ids(repo):
-            print(repository.full_name, str(default_branch), "->",
-                  str(default_branch) + "_abandoned_" + timestamp.strftime("%Y%m%d_%H%M%S"))
+            self.config.log.info("  %s -> %s" % (
+                repository.full_name, str(default_branch) + "_abandoned_" + timestamp.strftime("%Y%m%d_%H%M%S")))
             self.checkout_abandoned_branch(repository, default_branch, timestamp)
 
-            print(repository.full_name, str(default_branch), "<-", "origin/" + default_branch)
+            self.config.log.info("  %s %s <- origin/%s" % (
+                repository.full_name, str(default_branch), str(default_branch)))
             self.reset_branch(repo, default_branch)
 
     def update_local(self, repository):
         repo = Repo(self.get_repository_path(repository))
         local_default_branch = str(repo.active_branch).strip()
 
-        print(repository.full_name, "<-", "remote")
+        self.config.log.info("  %s <- remote", repository.full_name)
 
         try:
             repo.remote().fetch()
         except exc.GitCommandError as error:
-            print(repository.full_name, "fetch error:", error.status, file=sys.stderr)
-            self.failed_repos.append(repository.full_name)
+            self.config.log.error("%s fetch error: %s" % (repository.full_name, error.status))
+            self.config.error_count += 1
+            self.failed_repositories.append(repository.full_name)
 
         tracker = Tracker(self.config)
 
@@ -369,24 +402,30 @@ class Git:
                 if local_default_branch != branch_name:
                     repo.git.checkout('-b', branch_name, str(branch))
                     tracker.track_branch(branch_name, repo_id, datetime.now(), datetime.now(), False, True)
-            except exc.GitCommandError:
-                pass
+            except exc.GitCommandError as error:
+                if error.status != 128:
+                    self.config.log.error("%s %s -> %s failed: %s" % (
+                        repository.full_name, str(branch), branch_name, error.status))
+                    self.config.error_count += 1
 
             try:
                 repo.git.merge('--ff-only')
-                print(repository.full_name, branch_name, "<-", "origin/" + branch_name)
+                self.config.log.info("  %s %s <- origin/%s" % (repository.full_name, branch_name, branch_name))
 
                 if local_default_branch != branch_name:
                     tracker.update_branch(branch_name, repo_id, datetime.now())
             except exc.GitCommandError as error:
                 if error.status == 128:
-                    print(repository.full_name, branch_name, "<-", "origin/" + branch_name, "failed", file=sys.stderr)
+                    self.config.log.error("%s %s <- origin/%s failed: %s" % (
+                        repository.full_name, branch_name, branch_name, error.status))
+                    self.config.error_count += 1
                     self.backup_branch(repository, branch_name)
 
         try:
             repo.git.checkout(local_default_branch)
         except exc.GitCommandError as error:
-            print(repository.full_name, local_default_branch, "checkout failed:", error.status, file=sys.stderr)
+            self.config.log.error("%s %s checkout failed: %s" % (
+                repository.full_name, local_default_branch, error.status))
             self.failed_repos.append(repository.full_name)
 
         tracker.update_repository(repository.full_name, tracker.get_organization_id(repository.organization.login),
@@ -402,7 +441,8 @@ class Git:
                 repo.git.branch('-D', branch_name)
                 removed = True
             except exc.GitCommandError as error:
-                print(repository_name, branch_name, "deletion error:", error.status, file=sys.stderr)
+                self.config.log.error("%s %s deletion failed: %s" % (repository_name, branch_name, error.status))
+                self.config.error_count += 1
                 removed = False
         else:
             remote_branches = []
@@ -417,7 +457,8 @@ class Git:
                         repo.git.branch('-D', branch_name)
                         removed = True
                 except exc.GitCommandError as error:
-                    print(repository_name, branch_name, "deletion error:", error.status, file=sys.stderr)
+                    self.config.log.error("%s %s deletion failed: %s" % (repository_name, branch_name, error.status))
+                    self.config.error_count += 1
                     removed = False
 
         return removed
@@ -429,16 +470,17 @@ class GithubBackup:
         self.github_api = GithubApi(config)
         self.tracker = Tracker(self.config)
 
+        self.github_api.print_info()
+
+        self.start_datetime = datetime.now()
+
         if self.config.get_ssh_key() is None:
-            print("SSH Key not found.", file=sys.stderr)
+            self.config.log.warning("SSH Key not found.")
 
         self.git = Git(config, self.github_api, self.config.get_ssh_key())
 
-        self.github_api.print_info()
-
     def backup_organizations(self):
-        print("-" * 80)
-        print("Backing up...")
+        self.config.log.info("Backing up:")
         total_organizations = 0
         total_repositories = 0
 
@@ -457,19 +499,26 @@ class GithubBackup:
 
                 self.git.update(repository)
 
-            print("-" * 80)
-            print("Processed", repositories, "repositories in", organization.login)
-            print("-" * 80)
+            self.config.log.info("Processed %s repositories in %s" % (repositories, organization.login))
 
-        print("Processed", total_repositories, "repositories in", total_organizations, "organizations.")
+        self.config.log.info(
+            "Processed %s repositories in %s organizations." % (total_repositories, total_organizations))
 
-    def print_failed_repositories(self):
+    def log_failed_repositories(self):
         failed_repositories = self.git.get_failed_repositories()
 
         if len(failed_repositories) > 0:
-            print("Could not backup:", file=sys.stderr)
+            self.config.log.error("Could not backup:")
             for repository in failed_repositories:
-                print(repository, file=sys.stderr)
+                self.config.log.error("  %s", repository)
+                self.config.error_count += 1
+
+    def clean_branches_from_list(self, branches_list_tuples):
+        for branch_tuple in branches_list_tuples:
+            removed = self.git.remove_branch(branch_tuple[0], branch_tuple[1])
+            if removed:
+                self.config.log.info("  %s %s removed" % (branch_tuple[1], branch_tuple[0]))
+                self.tracker.delete_branch(branch_tuple[0], branch_tuple[1])
 
     def clean_abandoned_branches(self):
         retention_period = self.config.get_delete_abandoned_branches_after()
@@ -479,14 +528,8 @@ class GithubBackup:
         if len(branches) == 0:
             return
 
-        print("-" * 80)
-        print("Cleaning up abandoned branches:")
-
-        for branch_tuple in branches:
-            removed = self.git.remove_branch(branch_tuple[0], branch_tuple[1])
-            if removed:
-                print(branch_tuple[1], branch_tuple[0], "removed")
-                self.tracker.delete_branch(branch_tuple[0], branch_tuple[1])
+        self.config.log.info("Cleaning up abandoned branches:")
+        self.clean_branches_from_list(branches)
 
     def clean_tracked_branches(self):
         retention_period = self.config.get_delete_removed_branches_after()
@@ -496,27 +539,46 @@ class GithubBackup:
         if len(branches) == 0:
             return
 
-        print("-" * 80)
-        print("Cleaning up branches:")
-
-        for branch_tuple in branches:
-            removed = self.git.remove_branch(branch_tuple[0], branch_tuple[1])
-            if removed:
-                print(branch_tuple[1], branch_tuple[0], "removed")
-                self.tracker.delete_branch(branch_tuple[0], branch_tuple[1])
+        self.config.log.info("Cleaning up branches:")
+        self.clean_branches_from_list(branches)
 
     def clean_tracked_repositories(self):
         retention_period = self.config.get_delete_removed_repositories_after()
 
-        repositories = self.tracker.get_repositories_older_than(retention_period)
+        repositories = self.tracker.get_repositories_older_than(retention_period, True)
 
         if len(repositories) == 0:
             return
 
-        print("-" * 80)
-        print("Cleaning up repositories:")
+        self.config.log.info("Cleaning up repositories:")
 
         for repository in repositories:
             shutil.rmtree(os.path.join(self.config.get_backup_path(), repository), ignore_errors=True)
             self.tracker.delete_repository(repository, repository.rsplit('/', 1)[0])
-            print(repository, "removed")
+            self.config.log.info("  %s removed", repository)
+
+    def warn_before_scheduled_repository_deletion(self):
+        deletion_in = self.config.get_delete_removed_repositories_after() - self.config.get_warn_before_repository_deletion()
+
+        if deletion_in < 0:
+            return
+
+        repositories = self.tracker.get_repositories_older_than(deletion_in, False)
+
+        if len(repositories) == 0:
+            return
+
+        self.config.log.warning("Repositories scheduled for deletion in %s days:", deletion_in)
+
+        for repository in repositories:
+            self.config.log.warning("  %s", repository)
+            self.tracker.do_not_warn_about_future_deletion(repository)
+
+    def end(self):
+        self.config.end()
+
+        self.config.log.info("Backup ended. Duration: %s", naturaldelta(
+            self.config.start_datetime - self.config.end_datetime))
+
+        if self.config.error_count > 0:
+            sys.exit(1)
