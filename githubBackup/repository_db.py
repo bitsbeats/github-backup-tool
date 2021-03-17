@@ -12,7 +12,11 @@ class Organization(Base):
     __tablename__ = 'organizations'
     id = Column(Integer, primary_key=True)
     name = Column(String(), nullable=False)
+    created_date = Column(DateTime(), nullable=False)
+    last_seen_in_github = Column(DateTime(), nullable=False)
     track = Column(Boolean(), nullable=False)
+
+    scheduled_for_deletion = Column(Boolean(), nullable=False)
 
 
 class Repository(Base):
@@ -70,10 +74,23 @@ class Tracker:
         records = self.session.query(Organization).filter(Organization.name == organization).all()
 
         if len(records) >= 1:
+            for record in records:
+                record.last_seen_in_github = datetime.now()
+                record.track = True
             return
         else:
-            self.session.add(Organization(name=organization, track=track))
+            now = datetime.now()
+            self.session.add(Organization(name=organization, created_date=now, last_seen_in_github=now, track=track,
+                                          scheduled_for_deletion=False))
             self.session.commit()
+
+    def organization_exists(self, organization):
+        records = self.session.query(Organization).filter(Organization.name == organization).all()
+
+        if len(records) >= 1:
+            return True
+        else:
+            return False
 
     def get_organization_id(self, organization):
         record = self.session.query(Organization).filter(Organization.name == organization).first()
@@ -83,12 +100,51 @@ class Tracker:
     def get_organizations(self):
         records = self.session.query(Organization).all()
 
-        return records
+        organizations = []
 
-    # TODO: remove with cascade whole organization and its dependencies.
+        for record in records:
+            organizations.append(record.name)
+
+        return organizations
+
+    def get_untracked_organizations(self):
+        records = self.session.query(Organization).filter(Organization.track == False).all()
+
+        organizations = []
+
+        for record in records:
+            organizations.append(record.name)
+
+        return organizations
+
+    def safe_to_delete_organization(self, organization):
+        records = self.session.query(Organization).filter(Organization.name == organization,
+                                                          Organization.scheduled_for_deletion == True,
+                                                          Organization.track == False).all()
+        if len(records) > 0:
+            return True
+        else:
+            return False
+
+    def do_not_warn_about_future_orphaned_org_deletion(self, organization):
+        records = self.session.query(Organization).filter(Organization.name == organization,
+                                                          Organization.track == False).all()
+
+        if (len(records)) >= 1:
+            for record in records:
+                record.scheduled_for_deletion = True
+
+            self.session.commit()
+
+    # @todo remove with cascade whole organization and its dependencies.
     def delete_organization(self, organization):
-        records = self.session.query(Organization).filter(Organization.name == organization).all()
-        return
+        records = self.session.query(Organization).filter(Organization.name == organization,
+                                                          Organization.scheduled_for_deletion == True).all()
+
+        for record in records:
+            self.session.delete(record)
+
+        self.session.commit()
 
     def track_repository(self, repository, organization_id, create_date, last_seen_in_github, track):
         records = self.session.query(Repository).join(Organization,
@@ -105,6 +161,30 @@ class Tracker:
                            track=track, organization_id=organization_id, scheduled_for_deletion=False))
 
         self.session.commit()
+
+    def get_repositories_in_organization(self, organization):
+        organization_id = self.get_organization_id(organization)
+
+        records = self.session.query(Repository).join(Organization,
+                                                      Organization.id == Repository.organization_id).filter(
+            Repository.organization_id == organization_id).all()
+
+        repositories = []
+
+        for record in records:
+            repositories.append(record.name)
+
+        return repositories
+
+    def repository_exists(self, repository):
+        records = self.session.query(Repository).join(Organization,
+                                                      Organization.id == Repository.organization_id).filter(
+            Repository.name == repository).all()
+
+        if len(records) >= 1:
+            return True
+        else:
+            return False
 
     def get_repository_id(self, repository):
         record = self.session.query(Repository).filter(Repository.name == repository).first()
@@ -131,6 +211,7 @@ class Tracker:
             for record in records:
                 record.last_seen_in_github = datetime.now()
                 record.scheduled_for_deletion = False
+                record.track = True
 
             self.session.commit()
 
@@ -155,6 +236,7 @@ class Tracker:
             Repository.last_seen_in_github <= ago, Repository.scheduled_for_deletion == scheduled_for_deletion).all()
 
         list_of_repositories = []
+
         for record in records:
             list_of_repositories.append(record.name)
 

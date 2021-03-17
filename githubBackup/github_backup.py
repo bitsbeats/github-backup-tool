@@ -57,13 +57,15 @@ class Configuration:
             self.delete_abandoned_branches_after = config["tracker"]["deleteAbandonedBranchesAfter"]
             self.delete_removed_repositories_after = config["tracker"]["deleteRemovedRepositoriesAfter"]
             self.delete_removed_branches_after = config["tracker"]["deleteRemovedBranchesAfter"]
-
             self.warn_before_repository_deletion = config["tracker"]["warnBeforeRepositoryDeletion"]
+            self.warn_before_orphaned_org = config["tracker"]["warnBeforeOrphanedOrganizationDeletion"]
+            self.delete_orphaned_org_after = config["tracker"]["deleteOrphanedOrganizationsAfter"]
 
             self.loglevel = config["default"]["loglevel"]
 
         logging.basicConfig(level=self.loglevel,
-                            format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+                            format='%(asctime)s | %(levelname)s | %(message)s',
+                            datefmt='%Y-%m-%d %H:%M:%S')
 
         self.log = logging.getLogger(__name__)
         self.log.info("GitHub Backup Tool - Copyright (c) 2021 Thomann Bits & Beats GmbH - All Rights Reserved.")
@@ -120,6 +122,14 @@ class Configuration:
         duration = self.warn_before_repository_deletion
         return self.get_days(duration)
 
+    def get_warn_before_orphaned_org_deletion(self):
+        duration = self.warn_before_orphaned_org
+        return self.get_days(duration)
+
+    def get_delete_orphaned_org_after(self):
+        duration = self.delete_orphaned_org_after
+        return self.get_days(duration)
+
     def end(self):
         self.end_datetime = datetime.now()
 
@@ -158,10 +168,12 @@ class GithubApi:
             self.config.log.info("Potential data loss may occur.")
 
     def get_github_organizations(self):
+        self.rate_limit_wait()
         self.github_organizations = self.github.get_user().get_orgs()
         return self.github_organizations
 
     def get_github_configured_organizations(self):
+        self.rate_limit_wait()
         organizations = []
 
         for configured_organization in self.configured_organizations:
@@ -172,6 +184,7 @@ class GithubApi:
         return organizations
 
     def get_all_repositories_in_organization(self, organization):
+        self.rate_limit_wait()
         repositories_in_organization = []
 
         for repository in self.github.get_organization(organization.login).get_repos():
@@ -191,15 +204,17 @@ class GithubApi:
     def rate_limit_wait(self):
         limit = self.github.get_rate_limit()
         reset_core = limit.core.reset.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
 
         requests_remaining = self.github.rate_limiting[0]
         request_limit = self.github.rate_limiting[1]
 
         if (request_limit - requests_remaining) <= 0:
-            self.config.log.warning("GitHub Rate Limit exceeded! Waiting for %s for reset.",
-                                    naturaldelta(reset_core - now))
-            wait_time = (reset_core - now).total_seconds()
+            now = datetime.now(timezone.utc)
+            minutes_to_wait = (reset_core - now)
+            self.config.log.info("GitHub Rate Limit exceeded! Waiting for %s for reset.",
+                                 naturaldelta(reset_core - now))
+
+            wait_time = minutes_to_wait.total_seconds()
             time.sleep(wait_time)
 
 
@@ -272,7 +287,7 @@ class Git:
         except exc.GitCommandError as error:
             self.config.log.error("%s cannot access repository: %s" % (repository.full_name, error.status))
             self.config.error_count += 1
-            self.failed_repos.append(repository.full_name)
+            self.failed_repositories.append(repository.full_name)
 
     def update(self, repository):
         if not self.check_remote_repository_initialized(repository):
@@ -363,7 +378,7 @@ class Git:
 
         commit_id = repo.head.object.hexsha
 
-        # TODO: Maybe also use the 'commits' table in repository_db for tracking.
+        # @todo Maybe also use the 'commits' table in repository_db for tracking.
 
         if commit_id not in self.get_remote_branches_commit_ids(repo):
             self.config.log.info("  %s -> %s" % (
@@ -426,7 +441,7 @@ class Git:
         except exc.GitCommandError as error:
             self.config.log.error("%s %s checkout failed: %s" % (
                 repository.full_name, local_default_branch, error.status))
-            self.failed_repos.append(repository.full_name)
+            self.failed_repositories.append(repository.full_name)
 
         tracker.update_repository(repository.full_name, tracker.get_organization_id(repository.organization.login),
                                   datetime.now())
@@ -492,8 +507,6 @@ class GithubBackup:
             tracker.track_organization(organization.login, True)
 
             for repository in self.github_api.get_all_repositories_in_organization(organization):
-                self.github_api.rate_limit_wait()
-
                 total_repositories += 1
                 repositories += 1
 
@@ -557,22 +570,104 @@ class GithubBackup:
             self.tracker.delete_repository(repository, repository.rsplit('/', 1)[0])
             self.config.log.info("  %s removed", repository)
 
-    def warn_before_scheduled_repository_deletion(self):
-        deletion_in = self.config.get_delete_removed_repositories_after() - self.config.get_warn_before_repository_deletion()
+    def clean_orphaned_organizations(self):
+        organizations = self.tracker.get_untracked_organizations()
 
-        if deletion_in < 0:
+        for organization in organizations:
+            local_organization_path = None
+
+            try:
+                local_organization_path = os.path.join(self.config.get_backup_path(), organization)
+                local_repositories_in_organization = os.listdir(local_organization_path)
+            except FileNotFoundError:
+                local_repositories_in_organization = []
+
+            if self.tracker.safe_to_delete_organization(organization) and len(local_repositories_in_organization) == 0:
+                try:
+                    shutil.rmtree(local_organization_path)
+                except FileNotFoundError:
+                    self.config.log.info("%s does not exist", local_organization_path)
+
+                self.tracker.delete_organization(organization)
+                self.config.log.info("%s removed", organization)
+            else:
+                self.config.log.warning("%s is orphaned and unhandled", organization)
+
+    def warn_before_scheduled_repositories_deletion(self):
+        remove_repos_after = self.config.get_delete_removed_repositories_after()
+        warn_before_repo = self.config.get_warn_before_repository_deletion()
+        deletion_repo_in = remove_repos_after - warn_before_repo
+
+        repositories = self.tracker.get_repositories_older_than(deletion_repo_in, False)
+
+        if deletion_repo_in < 0 or len(repositories) == 0:
             return
 
-        repositories = self.tracker.get_repositories_older_than(deletion_in, False)
-
-        if len(repositories) == 0:
-            return
-
-        self.config.log.warning("Repositories scheduled for deletion in %s days:", deletion_in)
+        self.config.log.warning("Repositories scheduled for deletion in %s days:", deletion_repo_in)
 
         for repository in repositories:
             self.config.log.warning("  %s", repository)
             self.tracker.do_not_warn_about_future_deletion(repository)
+
+    def warn_before_scheduled_organizations_deletion(self):
+        rem_orgs_after = self.config.get_delete_orphaned_org_after()
+        warn_before_org = self.config.get_warn_before_orphaned_org_deletion()
+        deletion_org_in = rem_orgs_after - warn_before_org
+
+        organizations = self.tracker.get_untracked_organizations()
+
+        if deletion_org_in <= 0 or len(organizations) == 0:
+            return
+
+        self.config.log.warning("Organizations scheduled for deletion in %s days:", deletion_org_in)
+
+        for organization in organizations:
+            self.config.log.warning("  %s", organization)
+            self.tracker.do_not_warn_about_future_orphaned_org_deletion(organization)
+
+    def cross_check_local_repositories(self):
+        backup_dir = Path(self.config.get_backup_path())
+
+        organizations = []
+
+        for file in os.listdir(backup_dir):
+            if os.path.isdir(os.path.join(backup_dir, file)):
+                organizations.append(file)
+
+        github_organizations = []
+
+
+        for organization in self.github_api.get_github_configured_organizations():
+            github_organizations.append(organization.login)
+
+        now = datetime.now()
+        for organization in organizations:
+            if not self.tracker.organization_exists(organization) and organization not in github_organizations:
+                self.config.log.warning("Local orphaned organization found: %s", organization)
+                self.tracker.track_organization(organization, False)
+                organization_id = self.tracker.get_organization_id(organization)
+
+                repositories = []
+
+                for file in os.listdir(os.path.join(backup_dir, organization)):
+                    if os.path.isdir(os.path.join(backup_dir, organization, file)):
+                        repositories.append(file)
+
+                for repository in repositories:
+                    if not self.tracker.repository_exists(repository):
+                        repository_name = organization + "/" + repository
+                        self.tracker.track_repository(repository_name, organization_id, now, now, False)
+                        self.config.log.warning("  Local orphaned repository found: %s", repository_name)
+
+    def clean(self):
+        self.clean_abandoned_branches()
+        self.clean_tracked_branches()
+        self.warn_before_scheduled_organizations_deletion()
+        self.warn_before_scheduled_repositories_deletion()
+        self.clean_tracked_repositories()
+        self.clean_orphaned_organizations()
+        self.log_failed_repositories()
+        self.cross_check_local_repositories()
 
     def end(self):
         self.config.end()

@@ -25,12 +25,7 @@ def main():
 
     backup = GithubBackup(config)
     backup.backup_organizations()
-    backup.clean_abandoned_branches()
-    backup.clean_tracked_branches()
-    backup.warn_before_scheduled_repository_deletion()
-    backup.clean_tracked_repositories()
-    backup.log_failed_repositories()
-
+    backup.clean()
     backup.end()
 
 if __name__ == '__main__':

@@ -23,7 +23,9 @@ tracker:
     deleteAbandonedBranchesAfter: 90d
     deleteRemovedRepositoriesAfter: 90d
     deleteRemovedBranchesAfter: 90d
+    deleteOrphanedOrganizationsAfter: 90d
     warnBeforeRepositoryDeletion: 15d
+    warnBeforeOrphanedOrganizationDeletion: 15d
 
 # Organizations Settings
 # What organizations to backup
