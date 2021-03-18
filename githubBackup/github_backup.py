@@ -238,7 +238,7 @@ class Git:
 
     def __del__(self):
         try:
-            os.remove(self.wrapper)
+            os.remove(os.path.join(self.config.get_backup_path(), self.wrapper))
         except OSError:
             pass
 
@@ -253,22 +253,20 @@ class Git:
             self.use_git_ssh_wrapper = LooseVersion(
                 "{}.{}".format(str(git_version[0]), str(git_version[1]))) < LooseVersion("2.3")
 
-        if self.use_git_ssh_wrapper:
-            with open(os.path.join(self.wrapper), "w") as file:
+        if not self.use_git_ssh_wrapper:
+            with open(os.path.join(self.config.get_backup_path(), self.wrapper), "w") as file:
                 file.write("#!/bin/bash\n")
-                file.write(self.ssh_cmd + '"$@"')
+                file.write(self.ssh_cmd + ' "$@"\n')
                 file.close()
 
-            os.chmod(self.wrapper, S_IXUSR | S_IRUSR | S_IWUSR)
+            os.chmod(os.path.join(self.config.get_backup_path(), self.wrapper), S_IXUSR | S_IRUSR | S_IWUSR)
 
             try:
                 del self.git_ssh_cmd['GIT_SSH_COMMAND']
             except KeyError:
                 pass
 
-            self.git_ssh_cmd['GIT_SSH'] = os.path.abspath(self.wrapper)
-
-            print(self.git_ssh_cmd)
+            self.git_ssh_cmd['GIT_SSH'] = os.path.abspath(os.path.join(self.config.get_backup_path(), self.wrapper))
 
     def get_failed_repositories(self):
         return self.failed_repositories
@@ -310,11 +308,9 @@ class Git:
         repository_path = self.get_repository_path(repository)
         repository_url = self.get_repository_url(repository)
 
-        local_clone = Repo()
-
         try:
             self.config.log.info("%s -> %s" % (repository.full_name, repository_path))
-            local_clone.clone_from(repository_url, repository_path, env=self.git_ssh_cmd)
+            Repo.clone_from(repository_url, repository_path, env=self.git_ssh_cmd)
 
             tracker = Tracker(self.config)
 
