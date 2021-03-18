@@ -1,10 +1,12 @@
 from datetime import datetime, timezone
+from distutils.version import LooseVersion
 from pathlib import Path
 from typing import List
 
 from git import cmd, exc, Repo
 from github import Github, Repository
 from humanize import naturaldelta
+from stat import *
 from yaml import YAMLError, load
 
 try:
@@ -226,12 +228,39 @@ class Git:
         self.github = github
         self.failed_repositories = []
 
+        self.wrapper = "ssh_wrapper.sh"
+
+        self.ssh_cmd = ""
         self.git_ssh_cmd = {}
+        self.use_git_ssh_wrapper = False
+
+        self.setup_ssh()
+
+    def __del__(self):
+        try:
+            os.remove(self.wrapper)
+        except OSError:
+            pass
+
+    def setup_ssh(self):
         ssh_str_path = str(self.config.get_ssh_key())
 
         if ssh_str_path != ".":
-            self.git_ssh_cmd = {
-                "GIT_SSH_COMMAND": "ssh -i " + ssh_str_path + " -F " + "/dev/null " + "-o StrictHostKeyChecking=no"}
+            self.ssh_cmd = 'ssh -i {} -F /dev/null -o StrictHostKeyChecking=accept-new'.format(ssh_str_path)
+            self.git_ssh_cmd = {"GIT_SSH_COMMAND": self.ssh_cmd}
+
+            git_version = cmd.Git().version_info
+            self.use_git_ssh_wrapper = LooseVersion(
+                "{}.{}".format(str(git_version[0]), str(git_version[1]))) < LooseVersion("2.3")
+
+        if self.use_git_ssh_wrapper:
+            with open(os.path.join(self.wrapper), "w") as file:
+                file.write("#!/bin/bash\n")
+                file.write(self.ssh_cmd + '"$@"')
+                file.close()
+
+            os.chmod(self.wrapper, S_IXUSR | S_IRUSR | S_IWUSR)
+            self.git_ssh_cmd['GIT_SSH'] = os.path.abspath(self.wrapper)
 
     def get_failed_repositories(self):
         return self.failed_repositories
