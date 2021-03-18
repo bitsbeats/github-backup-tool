@@ -42,6 +42,12 @@ class Configuration:
                     sys.exit(1)
 
             self.backup_path = config["default"]["backupPath"]
+
+            try:
+                os.mkdir(os.path.abspath(self.backup_path))
+            except OSError:
+                pass
+
             self.clone_via_ssh = config["default"]["cloneViaSSH"]
             self.organizations = []
             self.token = config["default"]["token"]
