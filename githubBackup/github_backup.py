@@ -251,13 +251,16 @@ class Git:
             return True
 
     def check_remote_repository_initialized(self, repository: Repository):
+        tmp_repo_path = "github-backup-tool-tmp-repository"
+        tmp_repo = Repo.init(Path(tmp_repo_path))
+
         repository_url = self.get_repository_url(repository)
-        git = cmd.Git()
 
         try:
-            response = git.ls_remote('-h', repository_url, env=self.git_ssh_cmd).split()
+            response = tmp_repo.git.ls_remote('-h', repository_url, env=self.git_ssh_cmd).split()
 
             if len(response) > 0:
+                shutil.rmtree(Path(tmp_repo_path), ignore_errors=True)
                 return True
             else:
                 self.config.log.info("%s is empty", repository.full_name)
