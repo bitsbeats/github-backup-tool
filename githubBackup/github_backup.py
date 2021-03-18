@@ -230,8 +230,8 @@ class Git:
         ssh_str_path = str(self.config.get_ssh_key())
 
         if ssh_str_path != ".":
-            self.ssh_cmd = "ssh -i " + ssh_str_path + " -F " + "/dev/null " + "-o StrictHostKeyChecking=accept-new"
-            os.environ['GIT_SSH_COMMAND'] = self.ssh_cmd
+            self.git_ssh_cmd = {
+                "GIT_SSH_COMMAND": "ssh -i " + ssh_str_path + " -F " + "/dev/null " + "-o StrictHostKeyChecking=no"}
 
     def get_failed_repositories(self):
         return self.failed_repositories
@@ -255,7 +255,7 @@ class Git:
         git = cmd.Git()
 
         try:
-            response = git.ls_remote('-h', repository_url).split()
+            response = git.ls_remote('-h', repository_url, env=self.git_ssh_cmd).split()
 
             if len(response) > 0:
                 return True
@@ -337,13 +337,13 @@ class Git:
 
         return False
 
-    @classmethod
-    def get_remote_branches(cls, repository: Repo):
+    def get_remote_branches(self, repository: Repo):
         remote_branches = []
 
-        for ref in repository.remote().refs:
-            if str(ref).rsplit('/', 1)[-1] != "HEAD":
-                remote_branches.append(str(ref))
+        with repository.git.custom_environment(GIT_SSH_COMMAND=self.git_ssh_cmd["GIT_SSH_COMMAND"]):
+            for ref in repository.remote().refs:
+                if str(ref).rsplit('/', 1)[-1] != "HEAD":
+                    remote_branches.append(str(ref))
 
         return remote_branches
 
@@ -396,7 +396,8 @@ class Git:
         self.config.log.info("  %s <- remote", repository.full_name)
 
         try:
-            repo.remote().fetch()
+            with repo.git.custom_environment(GIT_SSH_COMMAND=self.git_ssh_cmd["GIT_SSH_COMMAND"]):
+                repo.remote().fetch()
         except exc.GitCommandError as error:
             self.config.log.error("%s fetch error: %s" % (repository.full_name, error.status))
             self.config.error_count += 1
