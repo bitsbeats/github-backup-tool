@@ -262,7 +262,7 @@ class Git:
             self.use_git_ssh_wrapper = LooseVersion(
                 "{}.{}".format(str(git_version[0]), str(git_version[1]))) < LooseVersion("2.3")
 
-        if not self.use_git_ssh_wrapper:
+        if self.use_git_ssh_wrapper:
             with open(ssh_wrapper, "w") as file:
                 file.write("#!/bin/bash\n")
                 file.write(self.ssh_cmd + ' "$@"\n')
@@ -320,6 +320,10 @@ class Git:
         try:
             self.config.log.info("%s -> %s" % (repository.full_name, repository_path))
             Repo.clone_from(repository_url, repository_path, env=self.git_ssh_cmd)
+            repo = Repo(repository_path)
+
+            if self.use_git_ssh_wrapper:
+                repo.git.config('merge.defaultToUpstream', 'true')
 
             tracker = Tracker(self.config)
 
