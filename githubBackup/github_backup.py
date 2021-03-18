@@ -275,7 +275,7 @@ class Git:
 
         try:
             self.config.log.info("%s -> %s" % (repository.full_name, repository_path))
-            local_clone.clone_from(repository_url, repository_path)
+            local_clone.clone_from(repository_url, repository_path, env=self.git_ssh_cmd)
 
             tracker = Tracker(self.config)
 
