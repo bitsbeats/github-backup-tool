@@ -350,8 +350,9 @@ class Git:
         branch_name = str(repo.active_branch) + "_abandoned_" + timestamp.strftime("%Y%m%d_%H%M%S")
 
         try:
-            repo.git.checkout('-b', branch_name)
-            repo.git.checkout(default_branch)
+            with repo.custom_environment(**self.git_ssh_cmd):
+                repo.git.checkout('-b', branch_name)
+                repo.git.checkout(default_branch)
         except exc.GitCommandError as error:
             self.config.log.error("%s %s checkout failed: %s" % (
                 repository.full_name, branch_name, error.status))
@@ -457,7 +458,8 @@ class Git:
 
             try:
                 if local_default_branch != branch_name:
-                    repo.git.checkout('-b', branch_name, str(branch))
+                    with repo.git.custom_environment(**self.git_ssh_cmd):
+                        repo.git.checkout('-b', branch_name, str(branch))
                     tracker.track_branch(branch_name, repo_id, datetime.now(), datetime.now(), False, True)
             except exc.GitCommandError as error:
                 if error.status != 128:
@@ -479,7 +481,8 @@ class Git:
                     self.backup_branch(repository, branch_name)
 
         try:
-            repo.git.checkout(local_default_branch)
+            with repo.git.custom_environment(**self.git_ssh_cmd):
+                repo.git.checkout(local_default_branch)
         except exc.GitCommandError as error:
             self.config.log.error("%s %s checkout failed: %s" % (
                 repository.full_name, local_default_branch, error.status))
