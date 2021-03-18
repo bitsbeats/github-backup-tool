@@ -252,7 +252,7 @@ class Git:
         ssh_str_path = str(self.config.get_ssh_key())
 
         if ssh_str_path != ".":
-            self.ssh_cmd = 'ssh -i {} -F /dev/null -o StrictHostKeyChecking=accept-new'.format(ssh_str_path)
+            self.ssh_cmd = 'ssh -i {} -F /dev/null -o StrictHostKeyChecking=no'.format(ssh_str_path)
             self.git_ssh_cmd = {"GIT_SSH_COMMAND": self.ssh_cmd}
 
             git_version = cmd.Git().version_info
@@ -350,7 +350,7 @@ class Git:
         branch_name = str(repo.active_branch) + "_abandoned_" + timestamp.strftime("%Y%m%d_%H%M%S")
 
         try:
-            with repo.custom_environment(**self.git_ssh_cmd):
+            with repo.git.custom_environment(**self.git_ssh_cmd):
                 repo.git.checkout('-b', branch_name)
                 repo.git.checkout(default_branch)
         except exc.GitCommandError as error:
