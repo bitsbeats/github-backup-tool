@@ -662,7 +662,7 @@ class GithubBackup:
             self.tracker.do_not_warn_about_future_orphaned_org_deletion(organization)
 
     def cross_check_local_repositories(self):
-        backup_dir = Path(self.config.get_backup_path())
+        backup_dir = Path(os.path.abspath(self.config.get_backup_path()))
 
         organizations = []
 
