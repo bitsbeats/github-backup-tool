@@ -260,7 +260,15 @@ class Git:
                 file.close()
 
             os.chmod(self.wrapper, S_IXUSR | S_IRUSR | S_IWUSR)
+
+            try:
+                del self.git_ssh_cmd['GIT_SSH_COMMAND']
+            except KeyError:
+                pass
+
             self.git_ssh_cmd['GIT_SSH'] = os.path.abspath(self.wrapper)
+
+            print(self.git_ssh_cmd)
 
     def get_failed_repositories(self):
         return self.failed_repositories
@@ -285,7 +293,7 @@ class Git:
         git = cmd.Git()
 
         try:
-            with git.custom_environment(GIT_SSH_COMMAND=self.git_ssh_cmd["GIT_SSH_COMMAND"]):
+            with git.custom_environment(**self.git_ssh_cmd):
                 response = git.ls_remote('-h', repository_url).split()
 
             if len(response) > 0:
@@ -371,7 +379,7 @@ class Git:
     def get_remote_branches(self, repository: Repo):
         remote_branches = []
 
-        with repository.git.custom_environment(GIT_SSH_COMMAND=self.git_ssh_cmd["GIT_SSH_COMMAND"]):
+        with repository.git.custom_environment(**self.git_ssh_cmd):
             for ref in repository.remote().refs:
                 if str(ref).rsplit('/', 1)[-1] != "HEAD":
                     remote_branches.append(str(ref))
@@ -427,7 +435,7 @@ class Git:
         self.config.log.info("  %s <- remote", repository.full_name)
 
         try:
-            with repo.git.custom_environment(GIT_SSH_COMMAND=self.git_ssh_cmd["GIT_SSH_COMMAND"]):
+            with repo.git.custom_environment(**self.git_ssh_cmd):
                 repo.remote().fetch()
         except exc.GitCommandError as error:
             self.config.log.error("%s fetch error: %s" % (repository.full_name, error.status))
@@ -667,7 +675,6 @@ class GithubBackup:
                 organizations.append(file)
 
         github_organizations = []
-
 
         for organization in self.github_api.get_github_configured_organizations():
             github_organizations.append(organization.login)
