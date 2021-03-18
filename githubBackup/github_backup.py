@@ -301,7 +301,7 @@ class Git:
 
         try:
             with git.custom_environment(**self.git_ssh_cmd):
-                response = Repo.git.ls_remote('-h', repository_url).split()
+                response = git.ls_remote('-h', repository_url).split()
 
             if len(response) > 0:
                 return True
