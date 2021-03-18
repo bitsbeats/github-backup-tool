@@ -242,16 +242,19 @@ class Git:
 
         self.setup_ssh()
 
-    def __del__(self):
-        try:
-            os.remove(os.path.join(self.config.get_backup_path(), self.wrapper))
-        except OSError:
-            pass
-
     def setup_ssh(self):
+        ssh_wrapper = os.path.join(self.config.get_backup_path(), self.wrapper)
+
+        if os.path.exists(ssh_wrapper):
+            try:
+                os.remove(ssh_wrapper)
+            except OSError:
+                pass
+
         ssh_str_path = str(self.config.get_ssh_key())
 
         if ssh_str_path != ".":
+            # @todo Adjust best options depending on OpenSSH version.
             self.ssh_cmd = 'ssh -i {} -F /dev/null -o StrictHostKeyChecking=no'.format(ssh_str_path)
             self.git_ssh_cmd = {"GIT_SSH_COMMAND": self.ssh_cmd}
 
@@ -260,19 +263,19 @@ class Git:
                 "{}.{}".format(str(git_version[0]), str(git_version[1]))) < LooseVersion("2.3")
 
         if not self.use_git_ssh_wrapper:
-            with open(os.path.join(self.config.get_backup_path(), self.wrapper), "w") as file:
+            with open(ssh_wrapper, "w") as file:
                 file.write("#!/bin/bash\n")
                 file.write(self.ssh_cmd + ' "$@"\n')
                 file.close()
 
-            os.chmod(os.path.join(self.config.get_backup_path(), self.wrapper), S_IXUSR | S_IRUSR | S_IWUSR)
+            os.chmod(ssh_wrapper, S_IXUSR | S_IRUSR | S_IWUSR)
 
             try:
                 del self.git_ssh_cmd['GIT_SSH_COMMAND']
             except KeyError:
                 pass
 
-            self.git_ssh_cmd['GIT_SSH'] = os.path.abspath(os.path.join(self.config.get_backup_path(), self.wrapper))
+            self.git_ssh_cmd['GIT_SSH'] = os.path.abspath(ssh_wrapper)
 
     def get_failed_repositories(self):
         return self.failed_repositories
@@ -298,7 +301,7 @@ class Git:
 
         try:
             with git.custom_environment(**self.git_ssh_cmd):
-                response = git.ls_remote('-h', repository_url).split()
+                response = Repo.git.ls_remote('-h', repository_url).split()
 
             if len(response) > 0:
                 return True
