@@ -3,7 +3,7 @@
 import argparse
 
 
-from githubBackup.github_backup import GithubBackup, Configuration
+from github_backup.backup import GithubBackup, Configuration
 
 
 def parse_args():
@@ -27,6 +27,7 @@ def main():
     backup.backup_organizations()
     backup.clean()
     backup.end()
+
 
 if __name__ == '__main__':
     main()

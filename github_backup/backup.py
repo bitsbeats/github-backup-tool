@@ -21,7 +21,7 @@ import shutil
 import sys
 import time
 
-from .repository_db import Tracker
+from github_backup.db import Tracker
 
 
 class Configuration:

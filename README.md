@@ -24,12 +24,12 @@ At this moment, it will not back up:
    * virtualenv:
        * Create a Python virtual environment via `virtualenv venv`
        * Activate your `venv` via `source venv/bin/activate` (Consider the shell you are using, and adjuct this step accrodingly.)
-       * Install all the dependencies via `pip install -r requirements.txt`
+       * Install via `pip install github-backup-tool`
    * distribution packages:
       * [GitPython](https://github.com/gitpython-developers/GitPython), [GitPython@Repology](https://repology.org/project/python:gitpython/versions)
       * [PyGithub](https://github.com/PyGithub/PyGithub), [PyGithub@Repology](https://repology.org/project/python:pygithub/versions)
       * [PyYAML](https://pyyaml.org/), [PyYAML@Repology](https://repology.org/project/python:pyyaml/versions)
-4. Run `backup.py`.
+4. Run `gbt -c yourconfig.yaml`.
 
 # TODOs:
 - [x] Backup abandoned commits in master as a separate branch if commits were pushed to origin forcefully

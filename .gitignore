@@ -2,3 +2,5 @@ config.yaml
 venv/*
 .idea/*
 backup/*
+build/*
+dist/*
