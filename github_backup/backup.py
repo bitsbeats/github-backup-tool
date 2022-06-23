@@ -76,7 +76,7 @@ class Configuration:
                             datefmt='%Y-%m-%d %H:%M:%S')
 
         self.log = logging.getLogger(__name__)
-        self.log.info("GitHub Backup Tool - Copyright (c) 2021 Thomann Bits & Beats GmbH - All Rights Reserved.")
+        self.log.info("GitHub Backup Tool - Copyright (c) 2022 Thomann Bits & Beats GmbH - All Rights Reserved.")
 
     def get_backup_path(self):
         return self.backup_path
