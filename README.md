@@ -19,6 +19,10 @@ At this moment, it will not back up:
 
 ## How to use?
 
+# In Docker:
+Instead of the token in the config.yml file set the GITHUB_API_TOKEN accordingly.
+An example docker-compose.yml can be found in the root dierctory of this repo.
+
 1. Set up a GitHub token, with a "repo" scope.
 2. Configure the `config.yaml` file accordingly.
 3. Set up your running environment either via a virtualenv or distribution packages:
