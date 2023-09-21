@@ -7,7 +7,9 @@
 default:
     # INFO, WARNING, ERROR, (DEBUG)
     loglevel: INFO
-    token: HERE_COMES_A_TOKEN
+    #token: HERE_COMES_A_TOKEN
+    #token: is to be used only when not running in a container;
+    # otherwise GITHUB_API_TOKEN environment variable has to be present
     backupPath: /path/to/backup/location
     cloneViaSSH: true
     ssh-key: path/to/some/id_sshkey

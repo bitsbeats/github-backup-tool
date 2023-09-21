@@ -1,6 +1,7 @@
 # github-backup-tool
 
 BIG NOTE: This is a work-in-progress.
+EVEN BIGGER NOTE: This is *not* a tool to use for Git backups, as it backs up Git repos in a way it was not supposed to by Git.
 
 A crunchy tool for backing up repositories of multiple specified GitHub organizations.
 
