@@ -71,12 +71,22 @@ class Configuration:
 
             self.loglevel = config["default"]["loglevel"]
 
-        logging.basicConfig(level=self.loglevel,
-                            format='%(asctime)s | %(levelname)s | %(message)s',
-                            datefmt='%Y-%m-%d %H:%M:%S')
-
         self.log = logging.getLogger(__name__)
-        self.log.info("GitHub Backup Tool - Copyright (c) 2022 Thomann Bits & Beats GmbH - All Rights Reserved.")
+        self.log.setLevel(self.loglevel)
+
+        self.log_formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s', '%Y-%m-%d %H:%M:%S')
+
+        self.log_handler_stdout = logging.StreamHandler(sys.stdout)
+        self.log_handler_stdout.setLevel(self.loglevel)
+        self.log_handler_stdout.setFormatter(self.log_formatter)
+        self.log.addHandler(self.log_handler_stdout)
+
+        self.log_handler_stderr = logging.StreamHandler(sys.stderr)
+        self.log_handler_stderr.setLevel(logging.ERROR)
+        self.log_handler_stderr.setFormatter(self.log_formatter)
+        self.log.addHandler(self.log_handler_stderr)
+
+        self.log.info("GitHub Backup Tool - Copyright (c) 2023 Thomann.io GmbH - All Rights Reserved.")
 
     def get_backup_path(self):
         return self.backup_path
@@ -725,6 +735,10 @@ class GithubBackup:
 
         self.config.log.info("Backup ended. Duration: %s", naturaldelta(
             self.config.start_datetime - self.config.end_datetime))
+
+        for handler in self.config.log.handlers:
+            handler.close()
+            self.config.log.removeFilter(handler)
 
         if self.config.error_count > 0:
             sys.exit(1)
