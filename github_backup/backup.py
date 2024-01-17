@@ -50,15 +50,7 @@ class Configuration:
 
             self.clone_via_ssh = config["default"]["cloneViaSSH"]
             self.organizations = []
-
-            self.token = ""
-
-            if "GITHUB_API_TOKEN" not in os.environ:
-                raise EnvironmentError("Failed because {} is not set.".format("GITHUB_API_TOKEN"))
-            else:
-                self.token = os.getenv("GITHUB_API_TOKEN")
-                if len(self.token) == 0:
-                    raise EnvironmentError("Failed because {} is empty.".format("GITHUB_API_TOKEN"))       
+            self.token = config["default"]["token"]
 
             ssh_key_path = Path(config["default"]["ssh-key"] if config["default"]["ssh-key"] is not None else "")
             self.ssh_key = ssh_key_path if os.path.exists(ssh_key_path) else None
@@ -84,7 +76,7 @@ class Configuration:
                             datefmt='%Y-%m-%d %H:%M:%S')
 
         self.log = logging.getLogger(__name__)
-        self.log.info("GitHub Backup Tool - Copyright (c) 2023 thomann.io GmbH - All Rights Reserved.")
+        self.log.info("GitHub Backup Tool - Copyright (c) 2022 Thomann Bits & Beats GmbH - All Rights Reserved.")
 
     def get_backup_path(self):
         return self.backup_path
@@ -731,8 +723,8 @@ class GithubBackup:
     def end(self):
         self.config.end()
 
-        #self.config.log.info("Backup ended. Duration: %s", naturaldelta(
-        #    self.config.start_datetime - self.config.end_datetime))
+        self.config.log.info("Backup ended. Duration: %s", naturaldelta(
+            self.config.start_datetime - self.config.end_datetime))
 
         if self.config.error_count > 0:
             sys.exit(1)

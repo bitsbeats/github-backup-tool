@@ -1,8 +1,0 @@
-services:
-    github-backup:
-        image: gihutb-backup
-        build: .
-        volumes:
-            - ./work:/work
-        environment:
-            - GITHUB_API_TOKEN=secret
